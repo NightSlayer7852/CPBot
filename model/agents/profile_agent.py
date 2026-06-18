@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
-from state.state import CPCoachState
+from state.cpstate import CPCoachState
 
 
 # =====================================================

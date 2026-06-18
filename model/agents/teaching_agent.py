@@ -2,50 +2,57 @@
 teaching_agent.py
 
 Responsibilities:
-1. Explain concepts.
-2. Recommend resources.
-3. Create beginner roadmaps.
-4. Generate study plans.
+1. Explain algorithms and provide conceptual instruction.
+2. Manage beginner guidance and construct roadmaps.
+3. Organize revision timelines and study plans.
+4. Recommend structural learning resources.
 
-It NEVER:
-- analyzes profiles
-- recommends problems
-- routes the graph
+Enterprise Constraints:
+- Strict boundary: Must NEVER analyze raw profiles or recommend specific contest problems.
+- Must execute deterministically, returning strongly-typed structured output schema.
+- Uses Groq for high-throughput, low-latency instruction generation.
 """
 
+from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
-from state.state import CPCoachState
+from state.cpstate import CPCoachState
 
 
 # =====================================================
 # OUTPUT SCHEMA
 # =====================================================
 
+class RevisionTask(BaseModel):
+    topic: str = Field(description="The specific algorithmic topic to revise")
+    timeframe: str = Field(description="Suggested timeframe (e.g., 'Day 1', 'Next Week')")
+    focus_area: str = Field(description="Specific sub-concept or weakness to focus on")
+
 class TeachingOutput(BaseModel):
-
     learning_content: str = Field(
-        description="Concept explanation"
+        description="Comprehensive, beginner-friendly explanation of the requested algorithm or concept. Include 'What it is', 'Why it is needed', 'Intuition', and 'When to use it'."
     )
-
-    resources: list[str] = Field(
-        description="Recommended resources"
+    resources: List[str] = Field(
+        description="List of top-tier resources (e.g., specific YouTube channel names, GeeksforGeeks, CP-Algorithms)."
     )
-
-    study_plan: list[str] = Field(
-        description="Short study plan"
+    study_plan: List[str] = Field(
+        description="Short, actionable roadmap or study plan based on user weaknesses."
+    )
+    revision_timeline: List[RevisionTask] = Field(
+        description="Structured timeline of topics the user needs to revisit to resolve their weaknesses."
     )
 
 
 # =====================================================
-# LLM
+# LLM INSTANTIATION
 # =====================================================
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
-    temperature=0.2
+    temperature=0.2, # Low temperature for deterministic instructional output
+    max_retries=3
 )
 
 
@@ -53,51 +60,22 @@ llm = ChatGroq(
 # SYSTEM PROMPT
 # =====================================================
 
-TEACHING_AGENT_PROMPT = """
-You are the Teaching Agent of CP Coach.
+TEACHING_AGENT_PROMPT = """You are the **Teaching Agent** inside the CP Coach Multi-Agent Architecture.
 
-Your responsibilities:
+**Role & Objective:**
+You specialize in breaking down complex Data Structures and Algorithms (DSA) into intuitive, beginner-friendly narratives. You design personalized learning roadmaps, recommend high-yield external resources, and formulate spaced-repetition revision timelines for competitive programmers.
 
-1. Explain concepts.
-2. Help beginners.
-3. Recommend resources.
-4. Create study plans.
+**Core Directives:**
+1. **Explain Concepts:** Break down algorithms exactly into 4 parts: What it is, Why it is needed, Core Intuition, and When to apply it.
+2. **Beginner Guidance:** Provide structured learning steps (Language syntax -> Basic Math -> Arrays -> etc) if the user is a novice.
+3. **Revision Timelines:** Dynamically map the user's supplied 'weaknesses' into an actionable spaced `revision_timeline`.
+4. **Hard Boundaries:** DO NOT analyze platform profiles. DO NOT recommend specific LeetCode/Codeforces problems (that is the Recommender Agent's job).
 
-Rules:
-
-- Be concise.
-- Be beginner friendly.
-- Explain step-by-step.
-- Use simple language.
-- Do not recommend problems.
-- Do not analyze profiles.
-
-For concept explanations:
-
-Explain:
-1. What it is
-2. Why it is needed
-3. Intuition
-4. When to use it
-
-For beginners:
-
-Recommend:
-- Language
-- Learning order
-- Resources
-
-For study plans:
-
-Generate a practical plan.
-Maximum 5 steps.
-
-Return structured output only.
+**Tone:** Academic, encouraging, extremely clear, and completely free of confusing jargon unless explicitly defined.
 """
 
-
 # =====================================================
-# PROMPT
+# PROMPT COMPOSITION
 # =====================================================
 
 prompt = ChatPromptTemplate.from_messages(
@@ -106,14 +84,12 @@ prompt = ChatPromptTemplate.from_messages(
         (
             "human",
             """
-            User Query:
-            {query}
-
-            Strengths:
-            {strengths}
-
-            Weaknesses:
-            {weaknesses}
+            **Execution Context:**
+            User Query: {query}
+            Current Strengths: {strengths}
+            Current Weaknesses: {weaknesses}
+            
+            Synthesize your instruction and timeline strictly matching the required schema.
             """
         )
     ]
@@ -121,46 +97,48 @@ prompt = ChatPromptTemplate.from_messages(
 
 
 # =====================================================
-# CHAIN
+# CHAIN DEFINITION
 # =====================================================
 
-teaching_chain = (
-    prompt
-    | llm.with_structured_output(
-        TeachingOutput
-    )
-)
+teaching_chain = prompt | llm.with_structured_output(TeachingOutput)
 
 
 # =====================================================
-# NODE
+# LANGGRAPH NODE EXECUTOR
 # =====================================================
 
-def teaching_agent_node(
-    state: CPCoachState
-):
+def teaching_agent_node(state: CPCoachState) -> Dict[str, Any]:
     """
-    Reads:
-        user_query
-        strengths
-        weaknesses
-
-    Writes:
-        learning_content
-        resources
-        study_plan
+    Executes the Teaching workflow within the CP Coach LangGraph.
+    
+    Reads: user_query, strengths, weaknesses
+    Writes: learning_content, resources, study_plan, revision_timeline
     """
-
-    result = teaching_chain.invoke(
+    
+    # Safe extraction of state inputs
+    query = state.get("user_query", "Give me a general beginner roadmap for CP.")
+    strengths = state.get("strengths") or ["None identified"]
+    weaknesses = state.get("weaknesses") or ["Fundamentals"]
+    
+    # Execute structured generation
+    result: TeachingOutput = teaching_chain.invoke(
         {
-            "query": state["user_query"],
-            "strengths": state.get("strengths", []),
-            "weaknesses": state.get("weaknesses", [])
+            "query": query,
+            "strengths": strengths,
+            "weaknesses": weaknesses
         }
     )
 
+    # Transform Pydantic objects back to state-compatible dictionaries
+    revision_timeline_dict = [
+        {"topic": task.topic, "timeframe": task.timeframe, "focus_area": task.focus_area}
+        for task in result.revision_timeline
+    ]
+
+    # Return partial state updates (appended/merged dynamically by LangGraph reducer)
     return {
         "learning_content": result.learning_content,
         "resources": result.resources,
-        "study_plan": result.study_plan
+        "study_plan": result.study_plan,
+        "revision_timeline": revision_timeline_dict
     }

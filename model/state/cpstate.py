@@ -1,3 +1,4 @@
+from typing import TypedDict, List
 
 class CPCoachState(TypedDict):
 
@@ -8,11 +9,11 @@ class CPCoachState(TypedDict):
     intent: str
 
     # which agents should run
-    next_agents: list[str]
+    next_agents: List[str]
 
     # profile analysis
-    strengths: list[str]
-    weaknesses: list[str]
+    strengths: List[str]
+    weaknesses: List[str]
 
     # recommendations
     recommended_problems: list
@@ -20,6 +21,8 @@ class CPCoachState(TypedDict):
     # teaching
     learning_content: str
     resources: list
+    study_plan: List[str]
+    revision_timeline: List[dict]
 
     # final answer
     final_response: str
