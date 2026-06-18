@@ -2,53 +2,42 @@
 recommendation_agent.py
 
 Responsibilities:
-1. Recommend next problems.
-2. Recommend focus topics.
-3. Explain WHY those problems were selected.
+1. Parse weaknesses to identify focus topics.
+2. Formulate LeetCode fetching parameters.
+3. Recommend EXACT real problems by triggering API tool logic.
+4. Explain WHY those topics and problems were selected.
 
 It NEVER:
-- Analyze profiles
-- Teach concepts
-- Create learning roadmaps
+- Teaches the algorithms/concepts directly.
+- Modifies profile directly without graph confirmation.
 """
 
+from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
 from state.cpstate import CPCoachState
+from tools.recommender.new_problem import fetch_leetcode_problems
 
 
 # =====================================================
 # OUTPUT SCHEMA
 # =====================================================
 
-class RecommendedProblem(BaseModel):
-
-    platform: str = Field(
-        description="leetcode or codeforces"
+class SearchQuery(BaseModel):
+    topic_slug: str = Field(
+        description="A valid lowercase hyphenated LeetCode topic slug (e.g., 'dynamic-programming', 'two-pointers', 'array', 'binary-search')."
     )
-
-    title: str = Field(
-        description="Problem name"
-    )
-
-    topic: str = Field(
-        description="Main topic"
-    )
-
     difficulty: str = Field(
-        description="easy, medium, hard"
+        description="Target difficulty level exactly matching: 'EASY', 'MEDIUM', or 'HARD'."
     )
-
+    count: int = Field(description="Number of problems to fetch for this topic (1-3).")
 
 class RecommendationOutput(BaseModel):
-
-    focus_topics: list[str]
-
-    recommended_problems: list[RecommendedProblem]
-
-    reasoning: str
+    focus_topics: List[str] = Field(description="Top concepts the user needs to practice next.")
+    search_queries: List[SearchQuery] = Field(description="Instructions for the agent to fetch exact problems.")
+    reasoning: str = Field(description="A brief explanation logically justifying why these topics were chosen.")
 
 
 # =====================================================
@@ -57,7 +46,8 @@ class RecommendationOutput(BaseModel):
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
-    temperature=0
+    temperature=0.1,
+    max_retries=3
 )
 
 
@@ -68,41 +58,18 @@ llm = ChatGroq(
 RECOMMENDATION_PROMPT = """
 You are the Recommendation Agent of CP Coach.
 
-Your responsibilities:
-
-1. Recommend next problems.
-2. Select the most important topics.
-3. Explain why those topics matter.
-
-You MUST use:
-
-- strengths
-- weaknesses
-- profile summary
+Your specific job:
+1. Look at the user's weaknesses and profile summary.
+2. Select the most urgent topics to practice right now.
+3. Generate exact structural queries to fetch LeetCode problems.
+4. Briefly justify your reasoning.
 
 Rules:
-
-1. Focus on weaknesses first.
-2. Do not recommend extremely difficult problems.
-3. Recommend gradual progression.
-4. Maximum 5 problems.
-5. Return structured output only.
-
-Example:
-
-Weakness:
-Dynamic Programming
-
-Recommendation:
-
-1. Climbing Stairs
-2. House Robber
-3. Coin Change
-
-Reason:
-Build DP fundamentals before advanced DP.
+1. Target progression over immediate mastery. For a beginner struggling with standard concepts, request 'EASY' or 'MEDIUM' difficulties.
+2. Map their weaknesses to standard LeetCode tags (e.g. 'hash-table', 'depth-first-search', 'math', 'greedy').
+3. Keep the total problem count requested across all queries to 5 or fewer.
+4. Never hallucinatively recommend problems by name—ONLY output standard `search_queries` so the Live API can securely fetch them.
 """
-
 
 # =====================================================
 # PROMPT
@@ -114,64 +81,58 @@ prompt = ChatPromptTemplate.from_messages(
         (
             "human",
             """
-            Strengths:
-            {strengths}
-
-            Weaknesses:
-            {weaknesses}
-
-            Profile Summary:
-            {profile_summary}
+            Strengths: {strengths}
+            Weaknesses: {weaknesses}
+            Profile Summary: {profile_summary}
+            
+            Based on the above, which tags/difficulties should we fetch problems for?
             """
         )
     ]
 )
 
-
 # =====================================================
 # CHAIN
 # =====================================================
 
-recommendation_chain = (
-    prompt
-    | llm.with_structured_output(
-        RecommendationOutput
-    )
-)
+recommendation_chain = prompt | llm.with_structured_output(RecommendationOutput)
 
 
 # =====================================================
 # NODE
 # =====================================================
 
-def recommendation_agent_node(
-    state: CPCoachState
-):
+def recommendation_agent_node(state: CPCoachState) -> Dict[str, Any]:
     """
-    Reads:
-        strengths
-        weaknesses
-        profile_summary
-
-    Writes:
-        focus_topics
-        recommended_problems
-        recommendation_reasoning
+    Executes the LLM request to find focus topics, runs the Leetcode Tool manually 
+    with the generated queries, and appends EXACT problems to the state graph.
     """
+    strengths = state.get("strengths", ["None"])
+    weaknesses = state.get("weaknesses", ["None"])
+    profile_summary = state.get("profile_summary", "New user. No data.")
 
-    result = recommendation_chain.invoke(
+    # 1. Ask LLM for what to search
+    result: RecommendationOutput = recommendation_chain.invoke(
         {
-            "strengths": state["strengths"],
-            "weaknesses": state["weaknesses"],
-            "profile_summary": state["profile_summary"]
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "profile_summary": profile_summary
         }
     )
 
+    # 2. Fetch EXACT problems from LeetCode GraphQL using the requested parameters
+    fetched_problems = []
+    
+    for query in result.search_queries:
+        problems = fetch_leetcode_problems(
+            topic_slug=query.topic_slug, 
+            difficulty=query.difficulty, 
+            limit=query.count
+        )
+        fetched_problems.extend(problems)
+
     return {
         "focus_topics": result.focus_topics,
-        "recommended_problems": [
-            problem.model_dump()
-            for problem in result.recommended_problems
-        ],
+        "recommended_problems": fetched_problems,
         "recommendation_reasoning": result.reasoning
     }

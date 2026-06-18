@@ -12,11 +12,14 @@ class CPCoachState(TypedDict):
     next_agents: List[str]
 
     # profile analysis
+    profile_summary: str
     strengths: List[str]
     weaknesses: List[str]
 
     # recommendations
+    focus_topics: List[str]
     recommended_problems: list
+    recommendation_reasoning: str
 
     # teaching
     learning_content: str
