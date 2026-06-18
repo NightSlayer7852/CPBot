@@ -1,15 +1,19 @@
 import requests
 from typing import List, Dict
 
-def fetch_leetcode_problems(topic_slug: str, difficulty: str = "MEDIUM", limit: int = 5) -> List[Dict]:
+def fetch_leetcode_problems(topic_slugs: List[str], difficulty: str = "MEDIUM", limit: int = 5, exclude_slugs: List[str] = None) -> List[Dict]:
     """
     Fetches exact problems from LeetCode GraphQL API.
     
     Args:
-        topic_slug: The hyphenated topic name (e.g., 'dynamic-programming', 'arrays')
+        topic_slugs: List of hyphenated topic names (e.g., ['dynamic-programming', 'memoization']) to intersect tags.
         difficulty: 'EASY', 'MEDIUM', or 'HARD'
         limit: Number of problems to fetch
+        exclude_slugs: List of 'titleSlug' strings of problems the user has already solved.
     """
+    if exclude_slugs is None:
+        exclude_slugs = []
+        
     query = """
     query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
       problemsetQuestionList: questionList(
@@ -33,9 +37,9 @@ def fetch_leetcode_problems(topic_slug: str, difficulty: str = "MEDIUM", limit: 
     variables = {
         "categorySlug": "",
         "skip": 0,
-        "limit": limit,
+        "limit": limit + len(exclude_slugs), # Over-fetch in case we filter out solved problems
         "filters": {
-            "tags": [topic_slug],
+            "tags": topic_slugs,
             "difficulty": difficulty.upper()
         }
     }
@@ -48,6 +52,9 @@ def fetch_leetcode_problems(topic_slug: str, difficulty: str = "MEDIUM", limit: 
         data = response.json()
         questions = data.get('data', {}).get('problemsetQuestionList', {}).get('questions', [])
         
+        # Filter out previously solved problems
+        unsolved = [q for q in questions if q['titleSlug'] not in exclude_slugs]
+        
         return [
             {
                 "platform": "LeetCode",
@@ -55,7 +62,7 @@ def fetch_leetcode_problems(topic_slug: str, difficulty: str = "MEDIUM", limit: 
                 "url": f"https://leetcode.com/problems/{q['titleSlug']}/",
                 "difficulty": q["difficulty"].capitalize()
             }
-            for q in questions
+            for q in unsolved[:limit]
         ]
     except Exception as e:
         print(f"LeetCode fetch error: {e}")

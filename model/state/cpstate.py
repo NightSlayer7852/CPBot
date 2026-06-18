@@ -15,6 +15,10 @@ class CPCoachState(TypedDict):
     profile_summary: str
     strengths: List[str]
     weaknesses: List[str]
+    
+    # progression state (UFP personalized data)
+    solved_problems: List[str]      # list of LC titleSlugs the user has already solved
+    topic_mastery: dict             # nested dict showing performance (e.g. {"Dynamic Programming": {"level": "Beginner", "easy_solved": 3}})
 
     # recommendations
     focus_topics: List[str]

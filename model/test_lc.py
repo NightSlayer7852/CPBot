@@ -26,7 +26,7 @@ def test_lc():
         "skip": 0,
         "limit": 5,
         "filters": {
-            "tags": ["dynamic-programming"],
+            "tags": ["dynamic-programming", "memoization"],
             "difficulty": "MEDIUM"
         }
     }

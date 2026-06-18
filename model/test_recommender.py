@@ -17,14 +17,23 @@ def run_test():
         print("WARNING: GROQ_API_KEY is not set in your environment.")
         print("The Groq API call will likely fail. Please set it before running.\n")
     
-    # Construct a mock state representing an intermediate who struggles with DP
+    # Construct a mock state representing an intermediate progressing to hard
     mock_state: CPCoachState = {
-        "user_query": "I need some problems to practice.",
+        "user_query": "Give me some DP practice.",
         "intent": "problem_recommendation",
         "next_agents": ["recommendation_agent"],
         "strengths": ["Arrays", "Two Pointers"],
         "weaknesses": ["Dynamic Programming", "Graph Theory"],
-        "profile_summary": "Intermediate user. Has solved 100 easy array questions but struggles hard on medium DP.",
+        "profile_summary": "Intermediate user. Excellent at 1D DP, completely fails Tree DP and Bitmask DP.",
+        
+        # New Deep Tracking State fields!
+        "topic_mastery": {
+            "Dynamic Programming - 1D": {"level": "Master", "easy_solved": 25, "medium_solved": 15},
+            "Dynamic Programming - Tree": {"level": "Beginner", "easy_solved": 0, "medium_solved": 0},
+            "Graph Theory - DFS": {"level": "Advanced", "medium_solved": 20, "hard_solved": 1}
+        },
+        "solved_problems": ["climbing-stairs", "house-robber", "fibonacci-number"], # Titles already solved
+        
         "focus_topics": [],
         "recommended_problems": [],
         "recommendation_reasoning": "",
